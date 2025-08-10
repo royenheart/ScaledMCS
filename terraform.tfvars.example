@@ -1,0 +1,69 @@
+# AWS基础配置
+# 可查看 EC2 的控制面板获取可用区域
+aws_region = "ap-east-1"
+availability_zones = ["ap-east-1a", "ap-east-1b"]
+
+# 项目配置
+project_name = "mc-deploy"
+environment = "prod"
+
+# 网络配置
+vpc_cidr = "10.0.0.0/16"
+public_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs = ["10.0.10.0/24", "10.0.20.0/24"]
+
+# AWS 中创建的 ssh 密钥
+key_name = "your-ssh-key"
+
+# 代理服务器配置（MCSManager Web前端）
+proxy_server = {
+  instance_type = "t4g.small"
+  volume_size   = 20
+  # 可选：使用弹性IP
+  use_elastic_ip = true
+}
+
+# MC服务器配置（MCSManager Daemon后端）
+mc_servers = [
+  {
+    name             = "survival-server"
+    instance_type    = "t4g.medium"
+    data_volume_size = 50            # 数据卷大小（保留数据）
+    mc_port          = 25565         # MC服务器端口
+    max_players      = 20
+    memory           = "4G"
+    auto_start       = true          # 玩家连接时自动启动
+    idle_timeout     = 1800          # 空闲30分钟后关机
+  },
+  {
+    name             = "creative-server"
+    instance_type    = "t4g.small"
+    data_volume_size = 30
+    mc_port          = 25566         # 不同端口
+    max_players      = 10
+    memory           = "2G"
+    auto_start       = true
+    idle_timeout     = 1800
+  }
+]
+
+# MCSManager配置
+mcsmanager = {
+  web_port    = 23333
+  daemon_port = 24444
+}
+
+# 域名配置（可选）
+# domain_name = "your-domain.com"  # 留空则使用公网IP地址
+
+# 网络访问配置
+allowed_ips = [
+  "0.0.0.0/0"  # 建议改为你的IP段
+]
+
+# 标签
+common_tags = {
+  Project     = "MC-Deploy"
+  Environment = "Production"
+  ManagedBy   = "Terraform"
+}
