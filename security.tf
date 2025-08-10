@@ -93,6 +93,15 @@ resource "aws_security_group" "proxy" {
     }
   }
 
+  # PostgreSQL数据库端口（仅来自VPC内网）
+  ingress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+    description = "PostgreSQL from VPC internal"
+  }
+
   # 出站规则：允许所有
   egress {
     from_port   = 0
