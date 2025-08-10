@@ -76,10 +76,11 @@ local function manual_scan()
             goto continue
         end
         
-        -- 检查是否已存在
+        -- 检查是否已存在（检查代理地址或直接IP地址）
+        local public_ip = get_public_ip()
         local daemon_uuid = nil
         for _, daemon in ipairs(existing_daemons) do
-            if daemon.ip == node.private_ip then
+            if (daemon.ip == public_ip and string.find(daemon.remarks or "", node.instance_id, 1, true)) or daemon.ip == node.private_ip then
                 daemon_uuid = daemon.uuid
                 log_info("节点 " .. node.instance_id .. " 已存在，UUID: " .. daemon_uuid)
                 break
@@ -87,13 +88,23 @@ local function manual_scan()
         end
         
         if not daemon_uuid then
-            -- 创建新的守护进程连接
+            -- 计算代理端口（基于节点在列表中的索引）
+            local node_index = 1
+            for i, n in ipairs(nodes) do
+                if n.instance_id == node.instance_id then
+                    node_index = i
+                    break
+                end
+            end
+            local proxy_port = 8000 + node_index - 1
+            
+            -- 创建新的守护进程连接（使用代理服务器公网IP）
             local create_url = _G.MC_CONFIG.mcsm_api_base .. "/service/remote_service?apikey=" .. api_key
             local create_data = {
-                ip = node.private_ip,
-                port = node.daemon_port or 24444,
+                ip = public_ip,
+                port = proxy_port,
                 prefix = "",
-                remarks = "MC服务器-" .. node.instance_id,
+                remarks = "MC服务器-" .. node.instance_id .. " (代理)",
                 apiKey = node.daemon_key
             }
             
@@ -130,7 +141,7 @@ local function manual_scan()
                 if updated_data and updated_data.status == 200 then
                     local updated_daemons = (updated_data.data and updated_data.data.remote) or {}
                     for _, daemon in ipairs(updated_daemons) do
-                        if daemon.ip == node.private_ip then
+                        if (daemon.ip == public_ip and string.find(daemon.remarks or "", node.instance_id, 1, true)) or daemon.ip == node.private_ip then
                             daemon_uuid = daemon.uuid
                             break
                         end

@@ -31,8 +31,10 @@ if ngx.var.request_method == "GET" then
     if node_list_str then
         local node_list = safe_json_decode(node_list_str)
         if node_list then
-            -- 生成代理配置映射
-            local base_port = 25565
+            -- 生成MC游戏端口代理配置
+            local mc_base_port = 25565
+            local daemon_base_port = 8000
+            
             for i, instance_id in ipairs(node_list) do
                 local node_key = "node:" .. instance_id
                 local node_str = nodes_dict:get(node_key)
@@ -40,12 +42,26 @@ if ngx.var.request_method == "GET" then
                 if node_str then
                     local node = safe_json_decode(node_str)
                     if node then
+                        -- MC游戏端口代理
                         table.insert(proxy_config, {
-                            proxy_port = base_port + i - 1,
+                            type = "mc_game",
+                            proxy_port = mc_base_port + i - 1,
                             instance_id = instance_id,
                             server_name = node.server_name or instance_id,
                             private_ip = node.private_ip,
                             target_port = 25565,
+                            status = "configured"
+                        })
+                        
+                        -- MCSM Daemon HTTP代理
+                        table.insert(proxy_config, {
+                            type = "mcsm_daemon",
+                            proxy_port = daemon_base_port + i - 1,
+                            instance_id = instance_id,
+                            server_name = node.server_name or instance_id,
+                            private_ip = node.private_ip,
+                            target_port = node.daemon_port or 24444,
+                            proxy_url = string.format("http://127.0.0.1:%d", daemon_base_port + i - 1),
                             status = "configured"
                         })
                     end

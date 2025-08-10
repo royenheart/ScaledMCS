@@ -189,24 +189,43 @@ if ngx.var.request_method == "POST" then
                             local daemons = (list_data.data and list_data.data.remote) or {}
                             local exists = false
                             
+                            local public_ip = get_public_ip()
                             for _, daemon in ipairs(daemons) do
-                                if daemon.ip == node.private_ip then
+                                -- 检查代理地址或直接IP地址
+                                if daemon.ip == public_ip and string.find(daemon.remarks or "", node.instance_id, 1, true) then
                                     exists = true
                                     -- 更新daemon_uuid
                                     node.daemon_uuid = daemon.uuid
-                                    log_info("找到已存在的守护进程: " .. node.instance_id .. " UUID: " .. daemon.uuid)
+                                    log_info("找到已存在的守护进程(代理): " .. node.instance_id .. " UUID: " .. daemon.uuid)
+                                    break
+                                elseif daemon.ip == node.private_ip then
+                                    exists = true
+                                    -- 更新daemon_uuid
+                                    node.daemon_uuid = daemon.uuid
+                                    log_info("找到已存在的守护进程(直接): " .. node.instance_id .. " UUID: " .. daemon.uuid)
                                     break
                                 end
                             end
                             
                             if not exists then
-                                -- 创建新的守护进程连接
+                                -- 计算代理端口（基于节点在列表中的索引）
+                                local node_index = 1
+                                for i, n in ipairs(nodes) do
+                                    if n.instance_id == node.instance_id then
+                                        node_index = i
+                                        break
+                                    end
+                                end
+                                local proxy_port = 8000 + node_index - 1
+                                
+                                -- 创建新的守护进程连接（使用代理服务器公网IP）
+                                local public_ip = get_public_ip()
                                 local create_url = _G.MC_CONFIG.mcsm_api_base .. "/service/remote_service?apikey=" .. api_key
                                 local create_data = {
-                                    ip = node.private_ip,
-                                    port = node.daemon_port or 24444,
+                                    ip = public_ip,
+                                    port = proxy_port,
                                     prefix = "",
-                                    remarks = "MC服务器-" .. node.instance_id,
+                                    remarks = "MC服务器-" .. node.instance_id .. " (代理)",
                                     apiKey = node.daemon_key
                                 }
                                 
@@ -227,7 +246,7 @@ if ngx.var.request_method == "POST" then
                                         if updated_data and updated_data.status == 200 then
                                             local updated_daemons = (updated_data.data and updated_data.data.remote) or {}
                                             for _, daemon in ipairs(updated_daemons) do
-                                                if daemon.ip == node.private_ip then
+                                                if (daemon.ip == public_ip and string.find(daemon.remarks or "", node.instance_id, 1, true)) or daemon.ip == node.private_ip then
                                                     node.daemon_uuid = daemon.uuid
                                                     log_info("获取到守护进程UUID: " .. node.instance_id .. " UUID: " .. daemon.uuid)
                                                     break

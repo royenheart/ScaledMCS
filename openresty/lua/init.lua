@@ -18,7 +18,9 @@ _G.MC_CONFIG = {
     idle_threshold = 300,       -- 空闲阈值（秒）
     default_mc_port = 25565,
     proxy_port_base = 25565,    -- MC代理端口起始
-    max_proxy_ports = 10        -- 最大代理端口数量
+    max_proxy_ports = 256,      -- 最大代理端口数量
+    daemon_proxy_base = 8000,   -- Daemon代理端口起始
+    public_ip = nil             -- 公网IP，启动时获取
 }
 
 -- HTTP客户端配置
@@ -90,6 +92,46 @@ _G.test_db_connection = function()
     log_info("连接测试输出: [" .. (result or "nil") .. "]")
     
     return success and exit_code == 0
+end
+
+-- 获取公网IP地址
+_G.get_public_ip = function()
+    if _G.MC_CONFIG.public_ip then
+        return _G.MC_CONFIG.public_ip
+    end
+    
+    local httpc = require "resty.http"
+    local client = httpc.new()
+    client:set_timeout(5000)
+    
+    -- 尝试多个IP获取服务
+    local ip_services = {
+        "http://ifconfig.me/ip",
+        "http://icanhazip.com",
+        "http://ipinfo.io/ip",
+        "http://checkip.amazonaws.com"
+    }
+    
+    for _, service in ipairs(ip_services) do
+        local res, err = client:request_uri(service, {
+            method = "GET",
+            headers = {
+                ["User-Agent"] = "MC-Monitor/1.0"
+            }
+        })
+        
+        if res and res.status == 200 and res.body then
+            local ip = string.match(res.body, "([%d%.]+)")
+            if ip then
+                _G.MC_CONFIG.public_ip = ip
+                log_info("获取到公网IP: " .. ip)
+                return ip
+            end
+        end
+    end
+    
+    log_warn("无法获取公网IP，使用默认地址")
+    return "127.0.0.1"
 end
 
 -- 从PostgreSQL数据库读取所有节点信息

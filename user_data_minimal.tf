@@ -100,6 +100,9 @@ mkdir -p /var/log/openresty
 sed "s/\$${var.mcsmanager.web_port}/$WEB_PORT/g; s/\$${var.mcsmanager.daemon_port}/$DAEMON_PORT/g" \
     /opt/openresty/conf/nginx.conf > /usr/local/openresty/nginx/conf/nginx.conf
 
+# 复制Daemon代理端口配置文件
+cp /opt/openresty/conf/daemon_proxy_ports.conf /usr/local/openresty/nginx/conf/daemon_proxy_ports.conf
+
 # 创建OpenResty服务
 tee /etc/systemd/system/openresty.service > /dev/null << 'OPENRESTY_SERVICE_EOF'
 [Unit]
