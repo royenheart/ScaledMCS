@@ -11,12 +11,10 @@ HTTPS_DAEMON_PORT=8443
 DOMAIN_NAME="${var.domain_name != "" ? var.domain_name : "$(curl -s ifconfig.me)"}"
 
 # 1. Configure basic env
-# 4. 安装OpenResty
 yum install -y yum-utils
 yum-config-manager --add-repo https://openresty.org/package/amazon/openresty.repo
 curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
 yum install -y wget unzip git htop vim nginx python3 python3-pip jq dnsutils nodejs pcre-devel openssl-devel gcc openresty openresty-resty postgresql15-server postgresql15-contrib
-useradd -m -s /bin/bash openresty || true
 
 # 2. Install MCSM
 useradd -m -s /bin/bash mcsmanager || true
@@ -102,9 +100,6 @@ mkdir -p /var/log/openresty
 sed "s/\$${var.mcsmanager.web_port}/$WEB_PORT/g; s/\$${var.mcsmanager.daemon_port}/$DAEMON_PORT/g" \
     /opt/openresty/conf/nginx.conf > /usr/local/openresty/nginx/conf/nginx.conf
 
-# 设置权限
-chown -R openresty:openresty /opt/openresty /usr/local/openresty/nginx/logs /var/log/openresty
-
 # 创建OpenResty服务
 tee /etc/systemd/system/openresty.service > /dev/null << 'OPENRESTY_SERVICE_EOF'
 [Unit]
@@ -119,8 +114,6 @@ ExecStartPre=/usr/local/openresty/bin/openresty -t
 ExecStart=/usr/local/openresty/bin/openresty
 ExecReload=/bin/kill -s HUP $MAINPID
 ExecStop=/bin/kill -s QUIT $MAINPID
-User=openresty
-Group=openresty
 
 [Install]
 WantedBy=multi-user.target
@@ -155,6 +148,7 @@ DAEMON_PORT=${var.mcsmanager.daemon_port}
 MC_PORT=${server.mc_port}
 MEMORY='${server.memory}'
 MAX_PLAYERS=${server.max_players}
+PROXY_PRIVATE_IP='${aws_instance.proxy.private_ip}'
 curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
 yum install -y wget unzip git htop vim screen jq java-17-amazon-corretto-devel java-21-amazon-corretto-devel java-11-amazon-corretto-devel java-1.8.0-amazon-corretto-devel nodejs postgresql15
 useradd -m -s /bin/bash mcsmanager || true
@@ -207,20 +201,16 @@ done
 
 DAEMON_KEY=$(jq -r '.key' /opt/mcsmanager/daemon/data/Config/global.json)
 
-# 获取代理服务器内网IP（用于连接数据库）
-PROXY_IP=$(aws ec2 describe-instances --region ${var.aws_region} \
-  --filters "Name=tag:Name,Values=${var.project_name}-proxy" "Name=instance-state-name,Values=running" \
-  --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text)
-
-if [ "$PROXY_IP" = "None" ] || [ -z "$PROXY_IP" ]; then
-  echo "错误: 无法获取代理服务器IP"
-  exit 1
-fi
-
+# 使用Terraform传递的代理服务器内网IP
+PROXY_IP="$PROXY_PRIVATE_IP"
 echo "代理服务器内网IP: $PROXY_IP"
 
-# 将节点信息写入PostgreSQL数据库
-PGPASSWORD='mc_monitor_2024!' psql -h $PROXY_IP -U mc_user -d mc_monitor << PSQL_EOF
+for i in {1..10}; do
+  echo "尝试连接数据库，第 $i 次..."
+  PGPASSWORD='mc_monitor_2024!' psql -h $PROXY_IP -U mc_user -d mc_monitor -c '\q' 2>/dev/null
+  if [ $? -eq 0 ]; then
+    echo "数据库连接成功，开始写入节点信息..."
+    PGPASSWORD='mc_monitor_2024!' psql -h $PROXY_IP -U mc_user -d mc_monitor << PSQL_EOF
 INSERT INTO mc_nodes (instance_id, server_name, private_ip, daemon_port, daemon_key, availability_zone)
 VALUES ('$INSTANCE_ID', '$SERVER_NAME', '$PRIVATE_IP', $DAEMON_PORT, '$DAEMON_KEY', '$AVAILABILITY_ZONE')
 ON CONFLICT (instance_id) DO UPDATE SET
@@ -231,12 +221,21 @@ ON CONFLICT (instance_id) DO UPDATE SET
     availability_zone = EXCLUDED.availability_zone,
     updated_at = CURRENT_TIMESTAMP;
 PSQL_EOF
-
-if [ $? -eq 0 ]; then
-  echo "成功将节点信息写入数据库"
-else
-  echo "写入数据库失败，可能需要等待代理服务器启动完成"
-fi
+    if [ $? -eq 0 ]; then
+      echo "成功将节点信息写入数据库"
+      break
+    else
+      echo "写入数据库失败，将重试..."
+    fi
+  else
+    echo "数据库连接失败，30秒后重试..."
+    sleep 30
+  fi
+  if [ $i -eq 10 ]; then
+    echo "警告: 无法连接到数据库，节点信息写入失败"
+    echo "请手动检查代理服务器上的PostgreSQL服务状态"
+  fi
+done
 
 echo "MC服务器 $SERVER_NAME 初始化完成"
 echo "Daemon端口: $DAEMON_PORT"
