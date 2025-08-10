@@ -167,6 +167,13 @@ if ngx.var.request_method == "POST" then
     ngx.timer.at(0, function()
         log_info("API Key已更新，触发节点扫描...")
         
+        -- 在异步函数内部重新获取API Key
+        local current_api_key = get_config("mcsm_api_key", "")
+        if current_api_key == "" then
+            log_error("异步任务中无法获取API Key")
+            return
+        end
+        
         -- 重新加载节点信息
         local nodes = load_nodes_from_storage()
         save_nodes_to_dict(nodes)
@@ -180,7 +187,7 @@ if ngx.var.request_method == "POST" then
             for _, node in ipairs(nodes) do
                 if node.daemon_key and node.private_ip then
                     -- 检查节点是否已存在
-                    local list_url = _G.MC_CONFIG.mcsm_api_base .. "/overview?apikey=" .. api_key
+                    local list_url = _G.MC_CONFIG.mcsm_api_base .. "/overview?apikey=" .. current_api_key
                     local res = client:request_uri(list_url, { method = "GET" })
                     
                     if res and res.status == 200 then
@@ -216,11 +223,11 @@ if ngx.var.request_method == "POST" then
                                         break
                                     end
                                 end
-                                local proxy_port = 8000 + node_index - 1
+                                local proxy_port = _G.MC_CONFIG.daemon_proxy_base + node_index - 1
                                 
                                 -- 创建新的守护进程连接（使用代理服务器公网IP）
                                 local public_ip = get_public_ip()
-                                local create_url = _G.MC_CONFIG.mcsm_api_base .. "/service/remote_service?apikey=" .. api_key
+                                local create_url = _G.MC_CONFIG.mcsm_api_base .. "/service/remote_service?apikey=" .. current_api_key
                                 local create_data = {
                                     ip = public_ip,
                                     port = proxy_port,

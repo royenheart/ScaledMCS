@@ -19,7 +19,7 @@ _G.MC_CONFIG = {
     default_mc_port = 25565,
     proxy_port_base = 25565,    -- MC代理端口起始
     max_proxy_ports = 256,      -- 最大代理端口数量
-    daemon_proxy_base = 8000,   -- Daemon代理端口起始
+    daemon_proxy_base = 8100,   -- Daemon代理端口起始 (避开8080冲突)
     public_ip = nil             -- 公网IP，启动时获取
 }
 
@@ -102,17 +102,17 @@ _G.get_public_ip = function()
     
     local httpc = require "resty.http"
     local client = httpc.new()
-    client:set_timeout(5000)
+    client:set_timeout(3000)
     
-    -- 尝试多个IP获取服务
-    local ip_services = {
+    -- 备用：尝试外部IP获取服务
+    local external_ip_services = {
+        "http://checkip.amazonaws.com",
         "http://ifconfig.me/ip",
         "http://icanhazip.com",
-        "http://ipinfo.io/ip",
-        "http://checkip.amazonaws.com"
+        "http://ipinfo.io/ip"
     }
     
-    for _, service in ipairs(ip_services) do
+    for _, service in ipairs(external_ip_services) do
         local res, err = client:request_uri(service, {
             method = "GET",
             headers = {
@@ -122,11 +122,23 @@ _G.get_public_ip = function()
         
         if res and res.status == 200 and res.body then
             local ip = string.match(res.body, "([%d%.]+)")
-            if ip then
+            if ip and ip ~= "127.0.0.1" then
                 _G.MC_CONFIG.public_ip = ip
-                log_info("获取到公网IP: " .. ip)
+                log_info("从外部服务获取到公网IP: " .. ip)
                 return ip
             end
+        end
+    end
+    
+    -- 最后备用：读取部署时保存的公网IP
+    local ip_file_handle = io.open("/etc/proxy_public_ip.txt", "r")
+    if ip_file_handle then
+        local saved_ip = ip_file_handle:read("*line")
+        ip_file_handle:close()
+        if saved_ip and string.match(saved_ip, "([%d%.]+)") then
+            _G.MC_CONFIG.public_ip = saved_ip
+            log_info("从文件读取到公网IP: " .. saved_ip)
+            return saved_ip
         end
     end
     

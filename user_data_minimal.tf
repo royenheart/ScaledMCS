@@ -34,6 +34,8 @@ systemctl enable --now postgresql
 
 # 配置PostgreSQL允许内网连接
 sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /var/lib/pgsql/data/postgresql.conf
+# TODO: Use more secure passwd identification method
+sed -i '/^host.*127.0.0.1.*ident/i host    all             all             127.0.0.1/32           md5' /var/lib/pgsql/data/pg_hba.conf
 echo "host    all             all             10.0.0.0/8             md5" >> /var/lib/pgsql/data/pg_hba.conf
 echo "host    all             all             172.16.0.0/12          md5" >> /var/lib/pgsql/data/pg_hba.conf
 echo "host    all             all             192.168.0.0/16         md5" >> /var/lib/pgsql/data/pg_hba.conf
@@ -82,10 +84,12 @@ systemctl restart postgresql
 # 3. 获取实际域名或IP地址
 if [ -z "${var.domain_name}" ]; then
   ACTUAL_DOMAIN=$(curl -s ifconfig.me)
-  USE_HTTPS=false
+  echo "$ACTUAL_DOMAIN" > /etc/proxy_public_ip.txt
+  chmod 644 /etc/proxy_public_ip.txt
 else
   ACTUAL_DOMAIN="${var.domain_name}"
-  USE_HTTPS=true
+  echo "$ACTUAL_DOMAIN" > /etc/proxy_public_ip.txt
+  chmod 644 /etc/proxy_public_ip.txt
 fi
 
 # 下载MC监控系统
@@ -138,7 +142,7 @@ echo "Web Panel HTTP 地址: http://$ACTUAL_DOMAIN"
 echo "本地 Daemon HTTP 地址: http://$ACTUAL_DOMAIN:8443"
 echo "各 MC 服务器 Daemon HTTP 地址："
 ${join("\n", [for i, server in var.mc_servers :
-    "echo \"  ${server.name}: http://$ACTUAL_DOMAIN:${9000 + i}\""
+    "echo \"  ${server.name}: http://$ACTUAL_DOMAIN:${8100 + i - 1}\""
 ])}
 EOF
 )

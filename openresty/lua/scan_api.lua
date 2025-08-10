@@ -96,7 +96,7 @@ local function manual_scan()
                     break
                 end
             end
-            local proxy_port = 8000 + node_index - 1
+            local proxy_port = _G.MC_CONFIG.daemon_proxy_base + node_index - 1
             
             -- 创建新的守护进程连接（使用代理服务器公网IP）
             local create_url = _G.MC_CONFIG.mcsm_api_base .. "/service/remote_service?apikey=" .. api_key

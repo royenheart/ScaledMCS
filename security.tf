@@ -73,8 +73,8 @@ resource "aws_security_group" "proxy" {
   dynamic "ingress" {
     for_each = { for i, server in var.mc_servers : i => server }
     content {
-      from_port   = 8000 + ingress.key
-      to_port     = 8000 + ingress.key
+      from_port   = 8100 + ingress.key
+      to_port     = 8100 + ingress.key
       protocol    = "tcp"
       cidr_blocks = ["0.0.0.0/0"]
       description = "HTTP proxy for ${ingress.value.name} daemon"

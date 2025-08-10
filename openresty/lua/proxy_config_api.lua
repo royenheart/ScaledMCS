@@ -33,7 +33,7 @@ if ngx.var.request_method == "GET" then
         if node_list then
             -- 生成MC游戏端口代理配置
             local mc_base_port = 25565
-            local daemon_base_port = 8000
+            local daemon_base_port = _G.MC_CONFIG.daemon_proxy_base
             
             for i, instance_id in ipairs(node_list) do
                 local node_key = "node:" .. instance_id
@@ -61,7 +61,7 @@ if ngx.var.request_method == "GET" then
                             server_name = node.server_name or instance_id,
                             private_ip = node.private_ip,
                             target_port = node.daemon_port or 24444,
-                            proxy_url = string.format("http://127.0.0.1:%d", daemon_base_port + i - 1),
+                            proxy_url = string.format("http://%s:%d", get_public_ip(), daemon_base_port + i - 1),
                             status = "configured"
                         })
                     end
@@ -73,8 +73,9 @@ if ngx.var.request_method == "GET" then
     local response = {
         proxy_config = proxy_config,
         total_proxies = #proxy_config,
-        base_port = 25565,
-        max_ports = 4,
+        mc_base_port = 25565,
+        daemon_base_port = _G.MC_CONFIG.daemon_proxy_base,
+        max_ports = _G.MC_CONFIG.max_proxy_ports,
         timestamp = ngx.time()
     }
     
