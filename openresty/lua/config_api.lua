@@ -113,7 +113,7 @@ if ngx.var.request_method == "POST" then
         local client = httpc.new()
         client:set_timeout(5000)
         
-        local test_url = _G.MC_CONFIG.mcsm_api_base .. "/service/remote_services_list?apikey=" .. key
+        local test_url = _G.MC_CONFIG.mcsm_api_base .. "/overview?apikey=" .. key
         
         local res, err = client:request_uri(test_url, {
             method = "GET",
@@ -180,13 +180,13 @@ if ngx.var.request_method == "POST" then
             for _, node in ipairs(nodes) do
                 if node.daemon_key and node.private_ip then
                     -- 检查节点是否已存在
-                    local list_url = _G.MC_CONFIG.mcsm_api_base .. "/service/remote_services_list?apikey=" .. api_key
+                    local list_url = _G.MC_CONFIG.mcsm_api_base .. "/overview?apikey=" .. api_key
                     local res = client:request_uri(list_url, { method = "GET" })
                     
                     if res and res.status == 200 then
                         local list_data = safe_json_decode(res.body)
                         if list_data and list_data.status == 200 then
-                            local daemons = list_data.data or {}
+                            local daemons = (list_data.data and list_data.data.remote) or {}
                             local exists = false
                             
                             for _, daemon in ipairs(daemons) do
@@ -201,11 +201,11 @@ if ngx.var.request_method == "POST" then
                             
                             if not exists then
                                 -- 创建新的守护进程连接
-                                local create_url = _G.MC_CONFIG.mcsm_api_base .. "/service/link_remote_service?apikey=" .. api_key
+                                local create_url = _G.MC_CONFIG.mcsm_api_base .. "/service/remote_service?apikey=" .. api_key
                                 local create_data = {
                                     ip = node.private_ip,
-                                    port = 24444,
-                                    prefix = "ws://",
+                                    port = node.daemon_port or 24444,
+                                    prefix = "",
                                     remarks = "MC服务器-" .. node.instance_id,
                                     apiKey = node.daemon_key
                                 }
@@ -225,7 +225,7 @@ if ngx.var.request_method == "POST" then
                                     if updated_res and updated_res.status == 200 then
                                         local updated_data = safe_json_decode(updated_res.body)
                                         if updated_data and updated_data.status == 200 then
-                                            local updated_daemons = updated_data.data or {}
+                                            local updated_daemons = (updated_data.data and updated_data.data.remote) or {}
                                             for _, daemon in ipairs(updated_daemons) do
                                                 if daemon.ip == node.private_ip then
                                                     node.daemon_uuid = daemon.uuid

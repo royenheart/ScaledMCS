@@ -62,7 +62,7 @@ if ngx.worker.id() == 0 then
         client:set_timeout(_G.HTTP_TIMEOUT)
         
         -- 获取该daemon的所有实例
-        local daemon_url = string.format("%s/service/remote_service_instances?uuid=%s&apikey=%s",
+        local daemon_url = string.format("%s/service/remote_service_instances?daemonId=%s&page=1&page_size=50&status=&apikey=%s",
             _G.MC_CONFIG.mcsm_api_base, node.daemon_uuid, api_key)
         
         local res, err = client:request_uri(daemon_url, {
@@ -88,7 +88,7 @@ if ngx.worker.id() == 0 then
             return
         end
         
-        local instances = data.data or {}
+        local instances = (data.data and data.data.data) or {}
         local total_players = 0
         local active_instances = 0
         
@@ -138,8 +138,8 @@ if ngx.worker.id() == 0 then
         local client = httpc.new()
         client:set_timeout(_G.HTTP_TIMEOUT)
         
-        local query_url = string.format("%s/protected_instance/query?uuid=%s&remote_uuid=%s&apikey=%s",
-            _G.MC_CONFIG.mcsm_api_base, daemon_uuid, instance_uuid, api_key)
+        local query_url = string.format("%s/instance?uuid=%s&daemonId=%s&apikey=%s",
+            _G.MC_CONFIG.mcsm_api_base, instance_uuid, daemon_uuid, api_key)
         
         local res, err = client:request_uri(query_url, {
             method = "GET",
@@ -157,10 +157,12 @@ if ngx.worker.id() == 0 then
             return -1
         end
         
-        -- 解析玩家数量（从状态信息中提取）
-        local status_info = data.data and data.data.status or ""
-        local players = string.match(status_info, "(%d+)/%d+") or "0"
-        return tonumber(players) or 0
+        -- 解析玩家数量（从实例详情中提取）
+        local instance_info = data.data
+        if instance_info and instance_info.info then
+            return instance_info.info.currentPlayers or 0
+        end
+        return 0
     end
     
     -- 处理空闲服务器
