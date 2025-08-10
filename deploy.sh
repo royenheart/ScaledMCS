@@ -222,8 +222,8 @@ show_results() {
     echo "==============================================="
     
     # 获取输出信息
-    local web_access=$(terraform output -raw mcsmanager_access 2>/dev/null || echo "")
-    local proxy_ip=$(terraform output -raw proxy_server_ip 2>/dev/null || echo "")
+    local web_access=$(terraform output -json mcsmanager_access | jq -r '.web_url // empty' || echo "")
+    local proxy_ip=$(terraform output -json proxy_server_info | jq -r '.public_ip // empty' || echo "")
     
     echo "🌐 MCSManager Web管理界面:"
     echo "   访问方式: $web_access"
@@ -233,13 +233,9 @@ show_results() {
     echo "   代理服务器IP: $proxy_ip"
     
     # 显示MC服务器信息
-    local mc_servers=$(terraform output -json mc_servers_info 2>/dev/null || echo "[]")
-    echo "   MC服务器信息：$mc_servers"
-    
-    echo ""
-    echo "🔗 SSH连接命令:"
-    echo "   代理服务器: ssh -i ~/.ssh/mc-deployment-key ubuntu@$proxy_ip"
-    
+    local mc_servers=$(terraform output -json mc_servers_info | jq || echo "[]")
+    printf "   MC服务器信息：\n${mc_servers}" 
+
     # 显示守护进程连接信息
     echo ""
     echo "🔧 智能监控功能:"
@@ -332,7 +328,7 @@ main() {
             echo ""
             echo "🌐 重要提醒："
             echo "   请访问监控配置界面完成API Key设置："
-            local proxy_ip=$(terraform output -raw proxy_server_ip 2>/dev/null || echo "")
+            local proxy_ip=$(terraform output -json proxy_server_info 2>/dev/null | jq -r '.public_ip // empty' || echo "")
             echo "   🔗 http://${proxy_ip}:9000"
             echo ""
             echo "📊 系统监控："
