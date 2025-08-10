@@ -338,7 +338,7 @@ main() {
             echo "📊 系统监控："
             echo "   OpenResty日志: tail -f /usr/local/openresty/nginx/logs/error.log"
             echo "   访问日志: tail -f /usr/local/openresty/nginx/logs/access.log"
-            echo "   共享存储: ls -la /mnt/mc-shared/nodes/"
+            echo "   数据库监控: sudo -u postgres psql -d mc_monitor -c 'SELECT * FROM mc_nodes;'"
             echo ""
             echo "Happy Gaming! 🎮"
             ;;

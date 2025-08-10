@@ -4,7 +4,11 @@ local cjson = require "cjson"
 -- 全局配置
 _G.MC_CONFIG = {
     shared_storage = "/mnt/mc-shared",
-    nodes_dir = "/mnt/mc-shared/nodes",
+    db_host = "127.0.0.1",
+    db_port = 5432,
+    db_name = "mc_monitor",
+    db_user = "mc_user",
+    db_password = "mc_monitor_2024!",
     mcsm_api_base = "http://127.0.0.1:23333/api",
     aws_region = "us-east-1",
     check_interval = 30,        -- 检查间隔（秒）
@@ -56,45 +60,60 @@ _G.safe_json_encode = function(data)
     return result
 end
 
--- 从共享存储目录扫描所有节点信息文件
+-- 从PostgreSQL数据库读取所有节点信息
 _G.load_nodes_from_storage = function()
     local nodes = {}
     
-    -- 使用系统命令扫描节点目录
-    local handle = io.popen("find " .. _G.MC_CONFIG.nodes_dir .. " -name '*.json' -type f 2>/dev/null")
+    -- 构建psql命令
+    local cmd = string.format(
+        "PGPASSWORD='%s' psql -h %s -p %d -U %s -d %s -t -c \"SELECT instance_id, server_name, private_ip, daemon_port, daemon_key, availability_zone FROM mc_nodes ORDER BY created_at;\" 2>/dev/null",
+        _G.MC_CONFIG.db_password,
+        _G.MC_CONFIG.db_host,
+        _G.MC_CONFIG.db_port,
+        _G.MC_CONFIG.db_user,
+        _G.MC_CONFIG.db_name
+    )
+    
+    local handle = io.popen(cmd)
     if not handle then
-        log_warn("无法扫描节点目录: " .. _G.MC_CONFIG.nodes_dir)
+        log_warn("无法连接到PostgreSQL数据库")
         return {}
     end
     
-    local node_files = handle:read("*all")
+    local result = handle:read("*all")
     handle:close()
     
-    if not node_files or node_files == "" then
-        log_warn("节点目录中没有找到节点文件")
+    if not result or result == "" then
+        log_warn("数据库中没有找到节点记录")
         return {}
     end
     
-    -- 逐个读取节点文件
-    for file_path in node_files:gmatch("[^\r\n]+") do
-        local file = io.open(file_path, "r")
-        if file then
-            local content = file:read("*all")
-            file:close()
+    -- 解析PostgreSQL输出（格式：instance_id | server_name | private_ip | daemon_port | daemon_key | availability_zone）
+    for line in result:gmatch("[^\r\n]+") do
+        local parts = {}
+        for part in line:gmatch("([^|]+)") do
+            -- 去除空格
+            table.insert(parts, part:match("^%s*(.-)%s*$"))
+        end
+        
+        if #parts >= 6 then
+            local node = {
+                instance_id = parts[1],
+                server_name = parts[2],
+                private_ip = parts[3],
+                daemon_port = tonumber(parts[4]),
+                daemon_key = parts[5],
+                availability_zone = parts[6]
+            }
             
-            local node, err = safe_json_decode(content)
-            if node and node.instance_id then
+            if node.instance_id and node.instance_id ~= "" then
                 table.insert(nodes, node)
-                log_info("加载节点: " .. node.instance_id .. " from " .. file_path)
-            else
-                log_error("解析节点文件失败: " .. file_path .. " - " .. (err or "invalid format"))
+                log_info("加载节点: " .. node.instance_id .. " IP: " .. node.private_ip)
             end
-        else
-            log_error("无法读取节点文件: " .. file_path)
         end
     end
     
-    log_info("从共享存储加载了 " .. #nodes .. " 个节点")
+    log_info("从数据库加载了 " .. #nodes .. " 个节点")
     return nodes
 end
 
