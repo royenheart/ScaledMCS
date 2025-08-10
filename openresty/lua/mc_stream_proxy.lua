@@ -1,5 +1,6 @@
 -- MC Stream代理Lua脚本
 local cjson = require "cjson"
+cjson.encode_empty_table_as_object(false)
 
 -- 获取当前监听端口
 local server_port = ngx.var.server_port

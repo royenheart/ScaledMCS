@@ -1,5 +1,6 @@
 -- 代理配置管理API
 local cjson = require "cjson"
+cjson.encode_empty_table_as_object(false)
 
 -- 设置响应头
 ngx.header.content_type = "application/json"

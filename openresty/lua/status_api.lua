@@ -47,6 +47,9 @@ local function get_system_status()
     local node_list_str = nodes_dict:get("node_list")
     local nodes = {}
     
+    -- 确保cjson将空表编码为数组而不是对象
+    cjson.encode_empty_table_as_object(false)
+    
     if node_list_str then
         local node_list = safe_json_decode(node_list_str)
         if node_list then

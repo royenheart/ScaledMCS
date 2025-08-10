@@ -122,6 +122,10 @@ OPENRESTY_SERVICE_EOF
 # 启用 OpenResty
 systemctl enable --now openresty
 
+# 下载 lua-resty-http 组件
+git clone https://github.com/pintsized/lua-resty-http /tmp/lua-resty-http
+cp /tmp/lua-resty-http/lib/resty/http* /usr/local/openresty/lualib/resty
+
 echo "OpenResty监控系统正在启动..."
 echo "配置界面URL: http://$ACTUAL_DOMAIN:9000"
 echo "MCSM Web界面: http://$ACTUAL_DOMAIN"

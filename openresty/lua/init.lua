@@ -1,6 +1,9 @@
 -- MC监控系统初始化脚本
 local cjson = require "cjson"
 
+-- 设置cjson将空表编码为数组而不是对象
+cjson.encode_empty_table_as_object(false)
+
 -- 全局配置
 _G.MC_CONFIG = {
     shared_storage = "/mnt/mc-shared",
@@ -64,15 +67,17 @@ end
 _G.load_nodes_from_storage = function()
     local nodes = {}
     
-    -- 构建psql命令
+    -- 构建psql命令，使用CSV格式输出更稳定
     local cmd = string.format(
-        "PGPASSWORD='%s' psql -h %s -p %d -U %s -d %s -t -c \"SELECT instance_id, server_name, private_ip, daemon_port, daemon_key, availability_zone FROM mc_nodes ORDER BY created_at;\" 2>/dev/null",
+        "PGPASSWORD='%s' psql -h %s -p %d -U %s -d %s -t -A -F',' -c \"SELECT instance_id, server_name, private_ip, daemon_port, daemon_key, availability_zone FROM mc_nodes ORDER BY created_at;\" 2>/dev/null",
         _G.MC_CONFIG.db_password,
         _G.MC_CONFIG.db_host,
         _G.MC_CONFIG.db_port,
         _G.MC_CONFIG.db_user,
         _G.MC_CONFIG.db_name
     )
+    
+    log_info("执行数据库查询命令")
     
     local handle = io.popen(cmd)
     if not handle then
@@ -83,32 +88,52 @@ _G.load_nodes_from_storage = function()
     local result = handle:read("*all")
     handle:close()
     
-    if not result or result == "" then
+    log_info("数据库查询原始结果: [" .. (result or "nil") .. "]")
+    
+    if not result or result == "" or result:match("^%s*$") then
         log_warn("数据库中没有找到节点记录")
         return {}
     end
     
-    -- 解析PostgreSQL输出（格式：instance_id | server_name | private_ip | daemon_port | daemon_key | availability_zone）
+    -- 解析CSV格式输出
+    local line_count = 0
     for line in result:gmatch("[^\r\n]+") do
-        local parts = {}
-        for part in line:gmatch("([^|]+)") do
-            -- 去除空格
-            table.insert(parts, part:match("^%s*(.-)%s*$"))
-        end
+        line_count = line_count + 1
+        line = line:match("^%s*(.-)%s*$")  -- 去除首尾空格
         
-        if #parts >= 6 then
-            local node = {
-                instance_id = parts[1],
-                server_name = parts[2],
-                private_ip = parts[3],
-                daemon_port = tonumber(parts[4]),
-                daemon_key = parts[5],
-                availability_zone = parts[6]
-            }
+        if line and line ~= "" then
+            log_info("处理行 " .. line_count .. ": [" .. line .. "]")
             
-            if node.instance_id and node.instance_id ~= "" then
-                table.insert(nodes, node)
-                log_info("加载节点: " .. node.instance_id .. " IP: " .. node.private_ip)
+            local parts = {}
+            for part in line:gmatch("([^,]+)") do
+                -- 去除空格和引号
+                part = part:match("^%s*(.-)%s*$")
+                if part:sub(1,1) == '"' and part:sub(-1) == '"' then
+                    part = part:sub(2, -2)
+                end
+                table.insert(parts, part)
+            end
+            
+            log_info("解析到 " .. #parts .. " 个字段")
+            
+            if #parts >= 6 then
+                local node = {
+                    instance_id = parts[1],
+                    server_name = parts[2],
+                    private_ip = parts[3],
+                    daemon_port = tonumber(parts[4]),
+                    daemon_key = parts[5],
+                    availability_zone = parts[6]
+                }
+                
+                if node.instance_id and node.instance_id ~= "" then
+                    table.insert(nodes, node)
+                    log_info("成功加载节点: " .. node.instance_id .. " IP: " .. node.private_ip)
+                else
+                    log_warn("节点instance_id为空，跳过")
+                end
+            else
+                log_warn("字段数不足6个，跳过此行")
             end
         end
     end

@@ -1,5 +1,6 @@
 -- Worker进程初始化和定时任务
 local cjson = require "cjson"
+cjson.encode_empty_table_as_object(false)
 
 -- 只在第一个worker中运行定时任务
 if ngx.worker.id() == 0 then
