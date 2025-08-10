@@ -11,8 +11,11 @@ HTTPS_DAEMON_PORT=8443
 DOMAIN_NAME="${var.domain_name != "" ? var.domain_name : "$(curl -s ifconfig.me)"}"
 
 # 1. Configure basic env
+# 4. 安装OpenResty
+yum install -y yum-utils
+yum-config-manager --add-repo https://openresty.org/package/amazon/openresty.repo
 curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-yum install -y wget unzip git htop vim nginx python3 python3-pip jq dnsutils nodejs pcre-devel openssl-devel gcc
+yum install -y wget unzip git htop vim nginx python3 python3-pip jq dnsutils nodejs pcre-devel openssl-devel gcc openresty openresty-resty
 
 # 2. Install MCSM
 useradd -m -s /bin/bash mcsmanager || true
@@ -35,18 +38,9 @@ else
   USE_HTTPS=true
 fi
 
-# 4. 安装OpenResty
-cd /tmp
-wget https://openresty.org/download/openresty-1.21.4.1.tar.gz
-tar -xzf openresty-1.21.4.1.tar.gz
-cd openresty-1.21.4.1
-./configure --with-luajit --with-http_ssl_module --with-http_v2_module --with-stream --with-stream_ssl_module
-make && make install
-useradd -r -s /sbin/nologin openresty
-
 # 下载MC监控系统
-git clone https://github.com/royenheart/Deploy-MC.git /tmp/Deploy-MC
-cp -r /tmp/Deploy-MC/openresty /opt/
+git clone https://github.com/royenheart/ScaledMCS.git /tmp/ScaledMCS
+cp -r /tmp/ScaledMCS/openresty /opt/
 
 # 创建必要目录
 mkdir -p /mnt/mc-shared
@@ -60,9 +54,9 @@ sed "s/\${var.mcsmanager.web_port}/$WEB_PORT/g; s/\${var.mcsmanager.daemon_port}
 # 设置权限
 chown -R openresty:openresty /opt/openresty /mnt/mc-shared /usr/local/openresty/nginx/logs /var/log/openresty
 
-# 创建节点信息文件（空文件，等待MC服务器写入）
-echo "[]" > /mnt/mc-shared/nodes.json
-chown openresty:openresty /mnt/mc-shared/nodes.json
+# 创建节点信息目录（等待MC服务器写入各自的节点文件）
+mkdir -p /mnt/mc-shared/nodes
+chown openresty:openresty /mnt/mc-shared/nodes
 
 # 创建OpenResty服务
 tee /etc/systemd/system/openresty.service > /dev/null << 'OPENRESTY_SERVICE_EOF'
@@ -186,9 +180,12 @@ systemctl disable --now mcsm-web.service
 
 # 获取当前实例的元数据
 # 使用 Instance Metadata Service (IMDS)
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-AVAILABILITY_ZONE=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+# SEE: https://docs.aws.amazon.com/zh_cn/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html
+TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` \
+	&& curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+PRIVATE_IP=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
+AVAILABILITY_ZONE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
 
 # 等待MCSM daemon启动并获取daemon key
 while [ ! -f /opt/mcsmanager/daemon/data/Config/global.json ]; do
@@ -196,50 +193,27 @@ while [ ! -f /opt/mcsmanager/daemon/data/Config/global.json ]; do
   sleep 5
 done
 
-DAEMON_KEY=$(jq -r '.gzip.key' /opt/mcsmanager/daemon/data/Config/global.json)
+DAEMON_KEY=$(jq -r '.key' /opt/mcsmanager/daemon/data/Config/global.json)
 
-# 创建节点信息并写入共享存储
-mkdir -p /mnt/mc-shared
-NODE_INFO=$(cat << NODE_EOF
-{
-  "instance_id": "$INSTANCE_ID",
-  "server_name": "$SERVER_NAME", 
-  "private_ip": "$PRIVATE_IP",
-  "daemon_port": $DAEMON_PORT,
-  "daemon_key": "$DAEMON_KEY",
-  "availability_zone": "$AVAILABILITY_ZONE",
-  "timestamp": $(date +%s)
-}
-NODE_EOF
-)
+# 创建节点信息并写入独立文件
+mkdir -p /mnt/mc-shared/nodes
 
-# 将节点信息追加到共享存储
-SHARED_NODES_FILE="/mnt/mc-shared/nodes.json"
+# 转义JSON字符串中的特殊字符
+ESCAPED_DAEMON_KEY=$(echo "$DAEMON_KEY" | sed 's/"/\\"/g')
+ESCAPED_SERVER_NAME=$(echo "$SERVER_NAME" | sed 's/"/\\"/g')
+ESCAPED_INSTANCE_ID=$(echo "$INSTANCE_ID" | sed 's/"/\\"/g')
+ESCAPED_PRIVATE_IP=$(echo "$PRIVATE_IP" | sed 's/"/\\"/g')
+ESCAPED_AZ=$(echo "$AVAILABILITY_ZONE" | sed 's/"/\\"/g')
 
-# 创建锁文件以避免并发写入冲突
-LOCK_FILE="/mnt/mc-shared/.nodes.lock"
-while ! (set -C; echo $$ > "$LOCK_FILE") 2>/dev/null; do
-  sleep 1
-done
+# 创建节点信息JSON
+NODE_INFO="{\"instance_id\":\"$ESCAPED_INSTANCE_ID\",\"server_name\":\"$ESCAPED_SERVER_NAME\",\"private_ip\":\"$ESCAPED_PRIVATE_IP\",\"daemon_port\":$DAEMON_PORT,\"daemon_key\":\"$ESCAPED_DAEMON_KEY\",\"availability_zone\":\"$ESCAPED_AZ\",\"timestamp\":$(date +%s)}"
 
-# 读取现有节点信息
-if [ -f "$SHARED_NODES_FILE" ] && [ -s "$SHARED_NODES_FILE" ]; then
-  EXISTING_NODES=$(cat "$SHARED_NODES_FILE")
-else
-  EXISTING_NODES="[]"
-fi
+echo "节点信息: $NODE_INFO"
 
-# 检查是否已存在此实例的信息
-UPDATED_NODES=$(echo "$EXISTING_NODES" | jq --argjson new_node "$NODE_INFO" '
-  # 移除已存在的同一instance_id的节点
-  map(select(.instance_id != $new_node.instance_id)) + [$new_node]
-')
-
-# 写入更新后的节点信息
-echo "$UPDATED_NODES" > "$SHARED_NODES_FILE"
-
-# 释放锁
-rm -f "$LOCK_FILE"
+# 将节点信息写入独立文件（以instance_id命名）
+NODE_FILE="/mnt/mc-shared/nodes/$${INSTANCE_ID}.json"
+echo "$NODE_INFO" > "$NODE_FILE"
+echo "成功写入节点信息到: $NODE_FILE"
 
 echo "MC服务器 $SERVER_NAME 初始化完成"
 echo "Daemon端口: $DAEMON_PORT"

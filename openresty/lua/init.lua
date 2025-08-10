@@ -4,7 +4,7 @@ local cjson = require "cjson"
 -- 全局配置
 _G.MC_CONFIG = {
     shared_storage = "/mnt/mc-shared",
-    node_info_file = "/mnt/mc-shared/nodes.json",
+    nodes_dir = "/mnt/mc-shared/nodes",
     mcsm_api_base = "http://127.0.0.1:23333/api",
     aws_region = "us-east-1",
     check_interval = 30,        -- 检查间隔（秒）
@@ -56,21 +56,42 @@ _G.safe_json_encode = function(data)
     return result
 end
 
--- 从共享存储读取节点信息
+-- 从共享存储目录扫描所有节点信息文件
 _G.load_nodes_from_storage = function()
-    local file = io.open(_G.MC_CONFIG.node_info_file, "r")
-    if not file then
-        log_warn("节点信息文件不存在: " .. _G.MC_CONFIG.node_info_file)
+    local nodes = {}
+    
+    -- 使用系统命令扫描节点目录
+    local handle = io.popen("find " .. _G.MC_CONFIG.nodes_dir .. " -name '*.json' -type f 2>/dev/null")
+    if not handle then
+        log_warn("无法扫描节点目录: " .. _G.MC_CONFIG.nodes_dir)
         return {}
     end
     
-    local content = file:read("*all")
-    file:close()
+    local node_files = handle:read("*all")
+    handle:close()
     
-    local nodes, err = safe_json_decode(content)
-    if not nodes then
-        log_error("解析节点信息失败: " .. (err or "unknown"))
+    if not node_files or node_files == "" then
+        log_warn("节点目录中没有找到节点文件")
         return {}
+    end
+    
+    -- 逐个读取节点文件
+    for file_path in node_files:gmatch("[^\r\n]+") do
+        local file = io.open(file_path, "r")
+        if file then
+            local content = file:read("*all")
+            file:close()
+            
+            local node, err = safe_json_decode(content)
+            if node and node.instance_id then
+                table.insert(nodes, node)
+                log_info("加载节点: " .. node.instance_id .. " from " .. file_path)
+            else
+                log_error("解析节点文件失败: " .. file_path .. " - " .. (err or "invalid format"))
+            end
+        else
+            log_error("无法读取节点文件: " .. file_path)
+        end
     end
     
     log_info("从共享存储加载了 " .. #nodes .. " 个节点")

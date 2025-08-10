@@ -41,6 +41,10 @@ check_requirements() {
         missing_tools+=("aws-cli")
     fi
     
+    if ! command -v jq &> /dev/null; then
+        missing_tools+=("jq")
+    fi
+    
     if [ ${#missing_tools[@]} -ne 0 ]; then
         log_error "缺少必要工具: ${missing_tools[*]}"
         log_info "请安装以下工具："
@@ -51,6 +55,9 @@ check_requirements() {
                     ;;
                 "aws-cli")
                     echo "  - AWS CLI: https://aws.amazon.com/cli/"
+                    ;;
+                "jq")
+                    echo "  - jq: https://stedolan.github.io/jq/download/"
                     ;;
             esac
         done
@@ -155,8 +162,18 @@ terraform_apply() {
 configure_mcsm_api() {
     log_info "配置MCSM API Key..."
     
-    local web_access=$(terraform output -raw mcsmanager_access 2>/dev/null || echo "")
-    local proxy_ip=$(terraform output -raw proxy_server_ip 2>/dev/null || echo "")
+    # 获取代理服务器IP
+    local proxy_ip=$(terraform output -json proxy_server_info 2>/dev/null | jq -r '.public_ip // empty' || echo "")
+    
+    # 获取MCSM Web访问URL
+    local web_access=$(terraform output -json mcsmanager_access 2>/dev/null | jq -r '.web_url // empty' || echo "")
+    
+    # 如果上面的方法失败，尝试手动构建URL
+    if [ -z "$web_access" ] && [ -n "$proxy_ip" ]; then
+        local web_port=$(terraform output -json mcsmanager_access 2>/dev/null | jq -r '.web_port // 23333' || echo "23333")
+        web_access="http://${proxy_ip}:${web_port}"
+    fi
+    
     local config_web_url="http://${proxy_ip}:9000"
     
     echo ""
@@ -321,7 +338,7 @@ main() {
             echo "📊 系统监控："
             echo "   OpenResty日志: tail -f /usr/local/openresty/nginx/logs/error.log"
             echo "   访问日志: tail -f /usr/local/openresty/nginx/logs/access.log"
-            echo "   共享存储: cat /mnt/mc-shared/nodes.json"
+            echo "   共享存储: ls -la /mnt/mc-shared/nodes/"
             echo ""
             echo "Happy Gaming! 🎮"
             ;;
